@@ -7,7 +7,9 @@ import {
   doc, 
   serverTimestamp, 
   query, 
-  orderBy 
+  orderBy,
+  writeBatch,
+  increment
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -21,6 +23,8 @@ export function subscribeCategories(callback) {
       // Normaliza para 'nome' mesmo se no banco tiver 'Nome'
       nome: docSnap.data().nome || docSnap.data().Nome || "Sem Nome"
     }));
+    // Ordem alfabética por padrão
+    list.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR", { sensitivity: "base" }));
     callback(list);
   }, (error) => {
     console.error("Erro ao escutar Categorias:", error);
@@ -50,6 +54,52 @@ export async function deleteCategory(id) {
   return await deleteDoc(docRef);
 }
 
+// --- COLEÇÕES ---
+export function subscribeCollections(callback) {
+  const colRef = collection(db, "Colecoes");
+  return onSnapshot(colRef, (snapshot) => {
+    const list = snapshot.docs.map((docSnap) => ({
+      id: docSnap.id,
+      ...docSnap.data(),
+      // Normaliza para 'nome' mesmo se no banco tiver 'Nome'
+      nome: docSnap.data().nome || docSnap.data().Nome || "Sem Nome"
+    }));
+    // Ordem alfabética por padrão
+    list.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR", { sensitivity: "base" }));
+    callback(list);
+  }, (error) => {
+    console.error("Erro ao escutar Coleções:", error);
+    callback([]);
+  });
+}
+
+export async function addCollectionDoc(nome) {
+  return await addDoc(collection(db, "Colecoes"), {
+    Nome: nome,
+    nome: nome,
+    criadoEm: serverTimestamp()
+  });
+}
+
+export async function updateCollectionDoc(id, nome) {
+  const docRef = doc(db, "Colecoes", id);
+  return await updateDoc(docRef, {
+    Nome: nome,
+    nome: nome,
+    atualizadoEm: serverTimestamp()
+  });
+}
+
+export async function deleteCollectionDoc(id) {
+  const docRef = doc(db, "Colecoes", id);
+  return await deleteDoc(docRef);
+}
+
+// Aliases em português para conveniência
+export const addColecao = addCollectionDoc;
+export const updateColecao = updateCollectionDoc;
+export const deleteColecao = deleteCollectionDoc;
+
 // --- EVENTOS ---
 export function subscribeEvents(callback) {
   const colRef = collection(db, "Eventos");
@@ -59,6 +109,8 @@ export function subscribeEvents(callback) {
       ...docSnap.data(),
       nome: docSnap.data().nome || docSnap.data().Nome || "Evento sem nome"
     }));
+    // Ordem alfabética por padrão
+    list.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR", { sensitivity: "base" }));
     callback(list);
   }, (error) => {
     console.error("Erro ao escutar Eventos:", error);
@@ -96,6 +148,11 @@ export function subscribeProducts(callback) {
   return onSnapshot(colRef, (snapshot) => {
     const list = snapshot.docs.map((docSnap) => {
       const data = docSnap.data();
+      const colecaoRef = data.colecao || data.Colecao || data.colecaoRef;
+      const colecaoId = typeof colecaoRef === "object" && colecaoRef?.id 
+        ? colecaoRef.id 
+        : (typeof colecaoRef === "string" ? colecaoRef : "");
+
       return {
         id: docSnap.id,
         ...data,
@@ -104,9 +161,14 @@ export function subscribeProducts(callback) {
         precoCusto: Number(data.precoCusto || 0),
         categoriaId: typeof data.categoria === "object" && data.categoria?.id 
           ? data.categoria.id 
-          : (typeof data.categoria === "string" ? data.categoria : "")
+          : (typeof data.categoria === "string" ? data.categoria : ""),
+        colecaoId: colecaoId,
+        ativo: data.ativo !== false, // Padrão é true (ativo)
+        estoque: typeof data.estoque === "number" ? data.estoque : (Number(data.estoque) || 0)
       };
     });
+    // Ordem alfabética por padrão
+    list.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR", { sensitivity: "base" }));
     callback(list);
   }, (error) => {
     console.error("Erro ao escutar Produtos:", error);
@@ -115,21 +177,31 @@ export function subscribeProducts(callback) {
 }
 
 export async function addProduct(product) {
-  // Salva o preço exatamente como número arredondado a 2 casas, sem decimais bizarros
   const precoFinal = Math.round(Number(product.preco) * 100) / 100;
   const precoCustoFinal = Math.round(Number(product.precoCusto || 0) * 100) / 100;
 
-  return await addDoc(collection(db, "Produtos"), {
+  const payload = {
     nome: product.nome,
     preco: precoFinal,
     precoCusto: precoCustoFinal,
     categoria: product.categoriaId || "",
     fotoUrl: product.fotoUrl || "",
+    ativo: (product.ativo === null || product.ativo === undefined || product.ativo === '') ? null : (product.ativo !== false),
+    estoque: Number(product.estoque || 0),
     criadoEm: serverTimestamp(),
     atualizadoEm: serverTimestamp(),
     criadoPor: "vendedor",
     atualizadoPor: "vendedor"
-  });
+  };
+
+  // Se houver colecaoId, salva como DocumentReference (tipo Reference no Firebase)
+  if (product.colecaoId) {
+    payload.colecao = doc(db, "Colecoes", product.colecaoId);
+  } else {
+    payload.colecao = null;
+  }
+
+  return await addDoc(collection(db, "Produtos"), payload);
 }
 
 export async function updateProduct(id, product) {
@@ -137,7 +209,7 @@ export async function updateProduct(id, product) {
   const precoCustoFinal = Math.round(Number(product.precoCusto || 0) * 100) / 100;
 
   const docRef = doc(db, "Produtos", id);
-  return await updateDoc(docRef, {
+  const payload = {
     nome: product.nome,
     preco: precoFinal,
     precoCusto: precoCustoFinal,
@@ -145,7 +217,55 @@ export async function updateProduct(id, product) {
     fotoUrl: product.fotoUrl || "",
     atualizadoEm: serverTimestamp(),
     atualizadoPor: "vendedor"
+  };
+
+  if (product.ativo !== undefined) {
+    payload.ativo = product.ativo !== false;
+  }
+  if (product.estoque !== undefined) {
+    payload.estoque = Number(product.estoque);
+  }
+
+  // Se houver colecaoId, salva como DocumentReference (tipo Reference no Firebase)
+  if (product.colecaoId) {
+    payload.colecao = doc(db, "Colecoes", product.colecaoId);
+  } else {
+    payload.colecao = null;
+  }
+
+  return await updateDoc(docRef, payload);
+}
+
+export async function toggleProductActive(id, currentStatus) {
+  const docRef = doc(db, "Produtos", id);
+  return await updateDoc(docRef, {
+    ativo: !currentStatus,
+    atualizadoEm: serverTimestamp()
   });
+}
+
+export async function updateProductStock(id, newStock) {
+  const docRef = doc(db, "Produtos", id);
+  return await updateDoc(docRef, {
+    estoque: Number(newStock),
+    atualizadoEm: serverTimestamp()
+  });
+}
+
+export async function replenishStockBatch(replenishments) {
+  // replenishments: array de { produtoId, quantidade }
+  const batch = writeBatch(db);
+  for (const item of replenishments) {
+    const qty = Number(item.quantidade);
+    if (item.produtoId && !isNaN(qty) && qty !== 0) {
+      const prodRef = doc(db, "Produtos", item.produtoId);
+      batch.update(prodRef, {
+        estoque: increment(qty),
+        atualizadoEm: serverTimestamp()
+      });
+    }
+  }
+  return await batch.commit();
 }
 
 export async function deleteProduct(id) {
@@ -164,7 +284,6 @@ export function subscribeSales(callback) {
     }));
     callback(list);
   }, (error) => {
-    // Se não tiver índice para orderBy, fallback para coleção normal
     console.warn("Fallback ao escutar Vendas:", error);
     return onSnapshot(colRef, (snapshot) => {
       const list = snapshot.docs.map((docSnap) => ({
@@ -177,11 +296,33 @@ export function subscribeSales(callback) {
 }
 
 export async function createSale(saleData) {
-  return await addDoc(collection(db, "Vendas"), {
+  const batch = writeBatch(db);
+
+  // 1. Cria a venda
+  const salesColRef = collection(db, "Vendas");
+  const newSaleDocRef = doc(salesColRef);
+  batch.set(newSaleDocRef, {
     ...saleData,
     criadoEm: serverTimestamp(),
     atualizadoEm: serverTimestamp()
   });
+
+  // 2. Abate do estoque de cada item vendido (valores negativos permitidos)
+  if (Array.isArray(saleData.itens)) {
+    for (const item of saleData.itens) {
+      if (item.produtoId) {
+        const prodRef = doc(db, "Produtos", item.produtoId);
+        const qty = Number(item.quantidade || 1);
+        batch.update(prodRef, {
+          estoque: increment(-qty),
+          atualizadoEm: serverTimestamp()
+        });
+      }
+    }
+  }
+
+  await batch.commit();
+  return newSaleDocRef;
 }
 
 export async function deleteSale(saleId) {

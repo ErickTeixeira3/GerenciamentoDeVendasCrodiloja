@@ -10,17 +10,71 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { deleteSale } from '../../services/firestoreService';
+import { toast } from '../Common/ToastContainer';
+import { confirmDialog } from '../Common/ConfirmModal';
 
-export default function VendasList({ sales, events, currentEventId }) {
+// Helper para formatar data em YYYY-MM-DD
+const formatDateToISO = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const getDefaultDates = () => {
+  const today = new Date();
+  const past90 = new Date();
+  past90.setDate(past90.getDate() - 90);
+  return {
+    start: formatDateToISO(past90),
+    end: formatDateToISO(today)
+  };
+};
+
+const getSaleDateObj = (timestamp) => {
+  if (!timestamp) return null;
+  if (timestamp.toDate) return timestamp.toDate();
+  if (timestamp.seconds) return new Date(timestamp.seconds * 1000);
+  const d = new Date(timestamp);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+export default function VendasList({ sales = [], events = [], currentEventId }) {
   const [filterEventId, setFilterEventId] = useState(currentEventId || 'ALL');
+  const [startDate, setStartDate] = useState(() => getDefaultDates().start);
+  const [endDate, setEndDate] = useState(() => getDefaultDates().end);
 
-  // Filtragem por evento selecionado
+  // Eventos ordenados alfabeticamente
+  const sortedEvents = useMemo(() => {
+    return [...events].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' }));
+  }, [events]);
+
+  // Filtragem por evento selecionado e intervalo de datas (90 dias por padrão)
   const filteredSales = useMemo(() => {
-    if (filterEventId === 'ALL') return sales;
-    return sales.filter((s) => s.eventoId === filterEventId);
-  }, [sales, filterEventId]);
+    return sales.filter((s) => {
+      const matchEvent = filterEventId === 'ALL' || s.eventoId === filterEventId;
+      if (!matchEvent) return false;
 
-  // Totais do Evento Selecionado
+      if (!startDate && !endDate) return true;
+
+      const saleDate = getSaleDateObj(s.criadoEm);
+      if (!saleDate) return true;
+
+      if (startDate) {
+        const start = new Date(`${startDate}T00:00:00`);
+        if (saleDate < start) return false;
+      }
+
+      if (endDate) {
+        const end = new Date(`${endDate}T23:59:59.999`);
+        if (saleDate > end) return false;
+      }
+
+      return true;
+    });
+  }, [sales, filterEventId, startDate, endDate]);
+
+  // Totais do Período e Evento Selecionados
   const totalRevenue = useMemo(() => {
     return filteredSales.reduce((acc, s) => acc + (s.valorTotal || 0), 0);
   }, [filteredSales]);
@@ -42,21 +96,38 @@ export default function VendasList({ sales, events, currentEventId }) {
   }, [filteredSales]);
 
   const handleDelete = async (saleId) => {
-    if (window.confirm("Tem certeza que deseja cancelar/excluir este registro de venda?")) {
+    const confirmed = await confirmDialog({
+      title: "Cancelar Venda",
+      message: "Tem certeza que deseja cancelar/excluir este registro de venda?",
+      confirmText: "Sim, cancelar venda",
+      cancelText: "Não, manter",
+      danger: true
+    });
+
+    if (confirmed) {
       try {
         await deleteSale(saleId);
+        toast.success("Venda cancelada com sucesso.");
       } catch (err) {
-        alert("Erro ao excluir venda: " + err.message);
+        toast.error("Erro ao excluir venda: " + err.message);
       }
     }
   };
 
   const formatDateTime = (timestamp) => {
     if (!timestamp) return "Hoje";
-    if (timestamp.toDate) {
-      return timestamp.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateObj = getSaleDateObj(timestamp);
+    if (!dateObj) return "Hoje";
+
+    const today = new Date();
+    const isToday = dateObj.toDateString() === today.toDateString();
+    const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    if (isToday) {
+      return `Hoje, ${timeStr}`;
     }
-    return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateStr = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return `${dateStr} às ${timeStr}`;
   };
 
   return (
@@ -68,7 +139,7 @@ export default function VendasList({ sales, events, currentEventId }) {
       margin: '0 auto',
       width: '100%'
     }}>
-      {/* Topo com Filtro de Evento */}
+      {/* Topo com Filtros de Evento e Data */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -78,33 +149,78 @@ export default function VendasList({ sales, events, currentEventId }) {
         marginBottom: '20px'
       }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: '#fff', margin: 0 }}>
+          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
             Histórico de Vendas
           </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '2px' }}>
-            Registros gravados no Firestore em tempo real
-          </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Filter size={16} color="var(--text-muted)" />
-          <select
-            value={filterEventId}
-            onChange={(e) => setFilterEventId(e.target.value)}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 'var(--radius-md)',
-              fontSize: '13px',
-              fontWeight: 600
-            }}
-          >
-            <option value="ALL">Todos os Eventos</option>
-            {events.map((ev) => (
-              <option key={ev.id} value={ev.id}>
-                {ev.nome}
-              </option>
-            ))}
-          </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Filtro de Evento */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Filter size={16} color="var(--text-muted)" />
+            <select
+              value={filterEventId}
+              onChange={(e) => setFilterEventId(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '13px',
+                fontWeight: 600,
+                background: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-strong)'
+              }}
+            >
+              <option value="ALL">Todos os Eventos</option>
+              {sortedEvents.map((ev) => (
+                <option key={ev.id} value={ev.id} style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)' }}>
+                  {ev.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Filtro de Período (Data) */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: 'var(--bg-surface)',
+            padding: '2px 8px',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-strong)'
+          }}>
+            <Calendar size={15} color="var(--text-muted)" />
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                padding: '6px 2px',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                outline: 'none'
+              }}
+            />
+            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>-</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                padding: '6px 2px',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                outline: 'none'
+              }}
+            />
+          </div>
         </div>
       </div>
 
@@ -138,7 +254,7 @@ export default function VendasList({ sales, events, currentEventId }) {
           <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
             QTD. DE VENDAS
           </div>
-          <div style={{ fontSize: '24px', fontWeight: 800, color: '#fff' }}>
+          <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)' }}>
             {filteredSales.length} pedidos
           </div>
         </div>
@@ -182,7 +298,7 @@ export default function VendasList({ sales, events, currentEventId }) {
           border: '1px solid var(--border-subtle)'
         }}>
           <Receipt size={48} strokeWidth={1.2} style={{ color: 'var(--text-muted)', marginBottom: '12px' }} />
-          <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>Nenhuma venda registrada ainda</h3>
+          <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>Nenhuma venda registrada ainda</h3>
           <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>
             Faça sua primeira venda na aba PDV para ver os pedidos aqui!
           </p>
@@ -210,7 +326,7 @@ export default function VendasList({ sales, events, currentEventId }) {
                 gap: '8px'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontWeight: 800, fontSize: '15px', color: '#fff' }}>
+                  <span style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-primary)' }}>
                     {formatDateTime(sale.criadoEm)}
                   </span>
                   <span className="badge badge-primary">
@@ -254,7 +370,7 @@ export default function VendasList({ sales, events, currentEventId }) {
                 {(sale.itens || []).map((it, idx) => (
                   <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: 'var(--text-secondary)' }}>
-                      <strong style={{ color: '#fff' }}>{it.quantidade}x</strong> {it.nome}
+                      <strong style={{ color: 'var(--text-primary)' }}>{it.quantidade}x</strong> {it.nome}
                     </span>
                     <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
                       R$ {(it.subtotal || 0).toFixed(2).replace('.', ',')}

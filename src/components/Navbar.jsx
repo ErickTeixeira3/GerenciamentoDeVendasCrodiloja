@@ -1,69 +1,97 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { 
   ShoppingCart, 
   Receipt, 
   Package, 
   Calendar, 
   Plus, 
-  LogOut 
+  LogOut,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../services/firebase';
+import { confirmDialog } from './Common/ConfirmModal';
 
 export default function Navbar({ 
   activeTab, 
   setActiveTab, 
-  events, 
+  events = [], 
   currentEventId, 
   setCurrentEventId,
   onOpenNewEventModal,
-  user
+  user,
+  isHeaderHidden = false,
+  theme = 'light',
+  toggleTheme = () => {}
 }) {
-  const currentEvent = events.find(e => e.id === currentEventId);
+  const sortedEvents = useMemo(() => {
+    return [...events].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' }));
+  }, [events]);
 
-  const handleLogout = () => {
-    if (window.confirm("Deseja sair do sistema?")) {
+  const currentEvent = sortedEvents.find(e => e.id === currentEventId);
+
+  const handleLogout = async () => {
+    const confirmed = await confirmDialog({
+      title: "Sair do Sistema",
+      message: "Deseja realmente sair da sua conta?",
+      confirmText: "Sim, sair",
+      cancelText: "Cancelar",
+      danger: true
+    });
+    if (confirmed) {
       signOut(auth);
     }
   };
 
   return (
-    <header style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '12px 18px',
-      background: 'var(--bg-surface)',
-      borderBottom: '1px solid var(--border-subtle)',
-      position: 'sticky',
-      top: 0,
-      zIndex: 40,
-      gap: '12px',
-      flexWrap: 'wrap'
-    }}>
+    <header 
+      className={`app-navbar ${isHeaderHidden ? 'navbar-hidden' : ''}`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: isHeaderHidden ? '0 18px' : '10px 18px',
+        background: 'var(--bg-surface)',
+        borderBottom: isHeaderHidden ? 'none' : '1px solid var(--border-subtle)',
+        position: 'sticky',
+        top: 0,
+        zIndex: 40,
+        gap: '10px',
+        flexWrap: 'wrap',
+        maxHeight: isHeaderHidden ? '0px' : '140px',
+        opacity: isHeaderHidden ? 0 : 1,
+        overflow: 'hidden',
+        pointerEvents: isHeaderHidden ? 'none' : 'auto',
+        transform: isHeaderHidden ? 'translateY(-100%)' : 'translateY(0)',
+        transition: 'all 0.28s cubic-bezier(0.4, 0, 0.2, 1)'
+      }}
+    >
       {/* Logo e Nome da Loja */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <div style={{
           width: '38px',
           height: '38px',
           borderRadius: 'var(--radius-md)',
-          background: 'linear-gradient(135deg, #38bdf8 0%, #0284c7 100%)',
+          background: 'var(--bg-surface-elevated)',
+          border: '1px solid var(--border-strong)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: '#fff',
-          fontWeight: 800,
-          fontSize: '18px',
-          boxShadow: '0 4px 10px rgba(56, 189, 248, 0.3)'
+          padding: '5px',
+          boxShadow: 'var(--shadow-sm)',
+          flexShrink: 0
         }}>
-          🐊
+          <img 
+            src="/logoCrodiloja.svg" 
+            alt="Crodiloja" 
+            className="crodiloja-logo" 
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }} 
+          />
         </div>
         <div>
-          <div style={{ fontWeight: 700, fontSize: '17px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Crodiloja <span className="badge badge-primary">PDV</span>
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Feiras & Eventos
+          <div style={{ fontWeight: 700, fontSize: '18px', color: 'var(--text-primary)' }}>
+            Crodiloja
           </div>
         </div>
       </div>
@@ -82,7 +110,7 @@ export default function Navbar({
         <Calendar size={16} color="var(--primary)" />
         <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Evento:</span>
         
-        {events.length > 0 ? (
+        {sortedEvents.length > 0 ? (
           <select 
             value={currentEventId || ''} 
             onChange={(e) => setCurrentEventId(e.target.value)}
@@ -97,8 +125,8 @@ export default function Navbar({
               outline: 'none'
             }}
           >
-            {events.map((ev) => (
-              <option key={ev.id} value={ev.id} style={{ background: '#1f2937', color: '#fff' }}>
+            {sortedEvents.map((ev) => (
+              <option key={ev.id} value={ev.id} style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)' }}>
                 {ev.nome}
               </option>
             ))}
@@ -130,22 +158,22 @@ export default function Navbar({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '12px'
+            fontSize: '16px',
+            fontWeight: 700
           }}
         >
           <Plus size={14} />
         </button>
       </div>
 
-      {/* Navegação entre Abas e Botão Sair */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* Navegação entre Abas e Ações */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <nav style={{
           display: 'flex',
-          alignItems: 'center',
-          background: 'var(--bg-main)',
+          background: 'var(--bg-surface-elevated)',
           padding: '4px',
           borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--border-subtle)',
+          border: '1px solid var(--border-strong)',
           gap: '4px'
         }}>
           <button
@@ -203,6 +231,26 @@ export default function Navbar({
           </button>
         </nav>
 
+        {/* Alternador de Tema Claro / Escuro */}
+        <button
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
+          style={{
+            background: 'var(--bg-surface-elevated)',
+            color: theme === 'dark' ? '#f59e0b' : 'var(--primary)',
+            border: '1px solid var(--border-strong)',
+            width: '38px',
+            height: '38px',
+            borderRadius: 'var(--radius-md)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer'
+          }}
+        >
+          {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+        </button>
+
         {user && (
           <button
             onClick={handleLogout}
@@ -226,4 +274,3 @@ export default function Navbar({
     </header>
   );
 }
-

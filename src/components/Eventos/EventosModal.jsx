@@ -1,14 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Calendar, Plus, X, Check, Edit3, Trash2, CheckCircle2 } from 'lucide-react';
 import { addEvent, updateEvent, deleteEvent } from '../../services/firestoreService';
+import { toast } from '../Common/ToastContainer';
+import { confirmDialog } from '../Common/ConfirmModal';
 
-export default function EventosModal({ isOpen, onClose, events, currentEventId, setCurrentEventId }) {
+export default function EventosModal({ isOpen, onClose, events = [], currentEventId, setCurrentEventId }) {
   const [nome, setNome] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Edição de evento
   const [editingEventId, setEditingEventId] = useState(null);
   const [editingEventName, setEditingEventName] = useState('');
+
+  const sortedEvents = useMemo(() => {
+    return [...events].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' }));
+  }, [events]);
 
   if (!isOpen) return null;
 
@@ -20,9 +26,10 @@ export default function EventosModal({ isOpen, onClose, events, currentEventId, 
       setIsSubmitting(true);
       const docRef = await addEvent(nome.trim());
       setCurrentEventId(docRef.id);
+      toast.success(`Evento "${nome.trim()}" criado com sucesso!`);
       setNome('');
     } catch (err) {
-      alert("Erro ao cadastrar evento: " + err.message);
+      toast.error("Erro ao cadastrar evento: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -40,23 +47,33 @@ export default function EventosModal({ isOpen, onClose, events, currentEventId, 
 
     try {
       await updateEvent(evId, editingEventName.trim());
+      toast.success("Evento atualizado!");
       setEditingEventId(null);
     } catch (err) {
-      alert("Erro ao renomear evento: " + err.message);
+      toast.error("Erro ao renomear evento: " + err.message);
     }
   };
 
   const handleDelete = async (evId, evNome, e) => {
     e.stopPropagation();
-    if (window.confirm(`Tem certeza que deseja excluir o evento "${evNome}"?`)) {
+    const confirmed = await confirmDialog({
+      title: "Excluir Evento",
+      message: `Tem certeza que deseja excluir o evento "${evNome}"?`,
+      confirmText: "Sim, excluir",
+      cancelText: "Cancelar",
+      danger: true
+    });
+
+    if (confirmed) {
       try {
         await deleteEvent(evId);
         if (currentEventId === evId) {
           const remaining = events.filter(e => e.id !== evId);
           setCurrentEventId(remaining[0]?.id || '');
         }
+        toast.success(`Evento "${evNome}" excluído.`);
       } catch (err) {
-        alert("Erro ao excluir evento: " + err.message);
+        toast.error("Erro ao excluir evento: " + err.message);
       }
     }
   };
@@ -88,7 +105,7 @@ export default function EventosModal({ isOpen, onClose, events, currentEventId, 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Calendar size={20} color="var(--primary)" />
-            <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#fff', margin: 0 }}>
+            <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
               Gerenciar Eventos / Feiras
             </h2>
           </div>
@@ -136,12 +153,12 @@ export default function EventosModal({ isOpen, onClose, events, currentEventId, 
             EVENTOS CADASTRADOS (CLIQUE PARA SELECIONAR)
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '260px', overflowY: 'auto' }}>
-            {events.length === 0 ? (
+            {sortedEvents.length === 0 ? (
               <div style={{ fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center', padding: '16px' }}>
                 Nenhum evento criado ainda.
               </div>
             ) : (
-              events.map((ev) => {
+              sortedEvents.map((ev) => {
                 const isSelected = ev.id === currentEventId;
                 const isEditing = editingEventId === ev.id;
 
