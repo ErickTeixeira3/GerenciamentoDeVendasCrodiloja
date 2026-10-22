@@ -174,7 +174,7 @@ export default function PDVView({
   // Cálculo dos descontos padrões automáticos:
   // - 3 itens de "Cartela de adesivos" => - R$ 5
   // - 3 itens de "bottons grandes" => - R$ 5
-  // - 4 itens de "bottons pequenos" => - R$ 5
+  // - 5 itens de "bottons pequenos" => - R$ 5
   const autoDiscountAmount = useMemo(() => {
     let countCartelaAdesivos = 0;
     let countBottonsGrandes = 0;
@@ -197,7 +197,7 @@ export default function PDVView({
 
     const descAdesivos = Math.floor(countCartelaAdesivos / 3) * 5;
     const descBottonsG = Math.floor(countBottonsGrandes / 3) * 5;
-    const descBottonsP = Math.floor(countBottonsPequenos / 4) * 5;
+    const descBottonsP = Math.floor(countBottonsPequenos / 5) * 5;
 
     return descAdesivos + descBottonsG + descBottonsP;
   }, [cart, categoryMap, productCategoryMap]);
@@ -309,6 +309,7 @@ export default function PDVView({
           precoUnitario: product.preco,
           precoCusto: product.precoCusto || 0,
           categoriaId: product.categoriaId || '',
+          colecaoId: product.colecaoId || '',
           quantidade: 1,
           subtotal: product.preco
         }

@@ -186,6 +186,9 @@ export default function App() {
             sales={sales}
             events={events}
             currentEventId={currentEventId}
+            products={products}
+            categories={categories}
+            collections={collections}
           />
         )}
 

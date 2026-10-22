@@ -9,10 +9,7 @@ import {
   X, 
   Check, 
   AlertCircle,
-  Eye,
-  EyeOff,
   Search,
-  PlusCircle,
   Minus,
   AlertTriangle,
   TrendingUp,
@@ -35,6 +32,7 @@ import {
 } from '../../services/firestoreService';
 import { toast } from '../Common/ToastContainer';
 import { confirmDialog } from '../Common/ConfirmModal';
+import MultiSelectDropdown from '../Common/MultiSelectDropdown';
 
 // Helpers para formatação de moeda em tempo real no próprio campo
 const parseCurrencyInput = (val) => {
@@ -198,33 +196,38 @@ export default function ProdutosManager({ products = [], categories = [], collec
   const [ativo, setAtivo] = useState(true);
   const [estoque, setEstoque] = useState('0');
 
-  // Filtros avançados para a lista de produtos
+  // Filtros avançados para a lista de produtos (múltipla seleção)
   const [productSearch, setProductSearch] = useState('');
-  const [productCategoryFilter, setProductCategoryFilter] = useState('');
-  const [productCollectionFilter, setProductCollectionFilter] = useState('');
+  const [productCategoryFilters, setProductCategoryFilters] = useState([]); // array de IDs de categorias
+  const [productCollectionFilters, setProductCollectionFilters] = useState([]); // array de IDs de coleções
   const [productGroupBy, setProductGroupBy] = useState('categoria'); // 'categoria' ou 'colecao'
 
   // Gestão de Categorias
   const [editingCatId, setEditingCatId] = useState(null);
   const [editingCatName, setEditingCatName] = useState('');
   const [newCatInput, setNewCatInput] = useState('');
+  const [categorySearch, setCategorySearch] = useState(''); // Pesquisa em categorias existentes
 
   // Gestão de Coleções
   const [editingColId, setEditingColId] = useState(null);
   const [editingColName, setEditingColName] = useState('');
   const [newColInput, setNewColInput] = useState('');
+  const [collectionSearch, setCollectionSearch] = useState(''); // Pesquisa em coleções existentes
 
-  // Gestão de Estoque
+  // Gestão de Estoque (múltipla seleção)
   const [stockSearch, setStockSearch] = useState('');
-  const [stockFilter, setStockFilter] = useState('all'); // 'all', 'negativos', 'zerados', 'positivos', 'inativos'
+  const [stockFilters, setStockFilters] = useState([]); // Array combinável: 'ativos', 'inativos', 'com_estoque', 'zerados', 'negativos'
+  const [stockCategoryFilters, setStockCategoryFilters] = useState([]); // array de IDs de categorias
+  const [stockCollectionFilters, setStockCollectionFilters] = useState([]); // array de IDs de coleções
+  const [stockGroupBy, setStockGroupBy] = useState('categoria'); // 'categoria' ou 'colecao'
   const [editingStockId, setEditingStockId] = useState(null);
   const [editingStockVal, setEditingStockVal] = useState('');
 
-  // Modal de Reposição em Lote
+  // Modal de Reposição em Lote (múltipla seleção)
   const [isReplenishModalOpen, setIsReplenishModalOpen] = useState(false);
   const [replenishSearch, setReplenishSearch] = useState('');
-  const [replenishCategoryFilter, setReplenishCategoryFilter] = useState('');
-  const [replenishCollectionFilter, setReplenishCollectionFilter] = useState('');
+  const [replenishCategoryFilters, setReplenishCategoryFilters] = useState([]); // array de IDs de categorias
+  const [replenishCollectionFilters, setReplenishCollectionFilters] = useState([]); // array de IDs de coleções
   const [replenishGroupBy, setReplenishGroupBy] = useState('categoria'); // 'categoria' ou 'colecao'
   const [replenishMap, setReplenishMap] = useState({}); // { [productId]: number }
   const [isReplenishing, setIsReplenishing] = useState(false);
@@ -242,28 +245,48 @@ export default function ProdutosManager({ products = [], categories = [], collec
     return [...collections].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' }));
   }, [collections]);
 
+  // Opções para os componentes MultiSelectDropdown
+  const categorySelectOptions = useMemo(() => [
+    ...sortedCategories.map(c => ({ id: c.id, label: c.nome })),
+    { id: '__sem_categoria__', label: 'Sem categoria' }
+  ], [sortedCategories]);
+
+  const collectionSelectOptions = useMemo(() => [
+    ...sortedCollections.map(c => ({ id: c.id, label: c.nome })),
+    { id: '__sem_colecao__', label: 'Sem coleção' }
+  ], [sortedCollections]);
+
+  // Listas filtradas pela pesquisa em Categorias e Coleções
+  const filteredCategoriesList = useMemo(() => {
+    if (!categorySearch.trim()) return sortedCategories;
+    const term = categorySearch.toLowerCase().trim();
+    return sortedCategories.filter(c => (c.nome || '').toLowerCase().includes(term));
+  }, [sortedCategories, categorySearch]);
+
+  const filteredCollectionsList = useMemo(() => {
+    if (!collectionSearch.trim()) return sortedCollections;
+    const term = collectionSearch.toLowerCase().trim();
+    return sortedCollections.filter(c => (c.nome || '').toLowerCase().includes(term));
+  }, [sortedCollections, collectionSearch]);
+
   const productFilteredList = useMemo(() => {
     const term = productSearch.trim().toLowerCase();
     return sortedProducts.filter((p) => {
       const matchName = !term || (p.nome || '').toLowerCase().includes(term);
 
       let matchCat = true;
-      if (productCategoryFilter === '__sem_categoria__') {
-        matchCat = !p.categoriaId;
-      } else if (productCategoryFilter) {
-        matchCat = p.categoriaId === productCategoryFilter;
+      if (productCategoryFilters.length > 0) {
+        matchCat = productCategoryFilters.some(cf => cf === '__sem_categoria__' ? !p.categoriaId : p.categoriaId === cf);
       }
 
       let matchCol = true;
-      if (productCollectionFilter === '__sem_colecao__') {
-        matchCol = !p.colecaoId;
-      } else if (productCollectionFilter) {
-        matchCol = p.colecaoId === productCollectionFilter;
+      if (productCollectionFilters.length > 0) {
+        matchCol = productCollectionFilters.some(cf => cf === '__sem_colecao__' ? !p.colecaoId : p.colecaoId === cf);
       }
 
       return matchName && matchCat && matchCol;
     });
-  }, [sortedProducts, productSearch, productCategoryFilter, productCollectionFilter]);
+  }, [sortedProducts, productSearch, productCategoryFilters, productCollectionFilters]);
 
   const productGrouped = useMemo(() => {
     return groupProducts(productFilteredList, sortedCategories, sortedCollections, productGroupBy);
@@ -388,8 +411,8 @@ export default function ProdutosManager({ products = [], categories = [], collec
   const handleOpenReplenishModal = () => {
     setReplenishMap({});
     setReplenishSearch('');
-    setReplenishCategoryFilter('');
-    setReplenishCollectionFilter('');
+    setReplenishCategoryFilters([]);
+    setReplenishCollectionFilters([]);
     setIsReplenishModalOpen(true);
   };
 
@@ -558,17 +581,56 @@ export default function ProdutosManager({ products = [], categories = [], collec
   };
 
   const stockFilteredProducts = useMemo(() => {
+    const term = stockSearch.trim().toLowerCase();
+
+    const selectedStatus = stockFilters.filter(f => f === 'ativos' || f === 'inativos');
+    const selectedLevels = stockFilters.filter(f => f === 'com_estoque' || f === 'zerados' || f === 'negativos');
+
     return sortedProducts.filter((p) => {
-      const matchSearch = (p.nome || '').toLowerCase().includes(stockSearch.toLowerCase());
-      const est = p.estoque || 0;
-      let matchFilter = true;
-      if (stockFilter === 'negativos') matchFilter = est < 0;
-      else if (stockFilter === 'zerados') matchFilter = est === 0;
-      else if (stockFilter === 'positivos') matchFilter = est > 0;
-      else if (stockFilter === 'inativos') matchFilter = p.ativo === false;
-      return matchSearch && matchFilter;
+      // 1. Busca textual por nome
+      const matchSearch = !term || (p.nome || '').toLowerCase().includes(term);
+      if (!matchSearch) return false;
+
+      // 2. Filtro de Categoria (múltipla seleção)
+      let matchCat = true;
+      if (stockCategoryFilters.length > 0) {
+        matchCat = stockCategoryFilters.some(cf => cf === '__sem_categoria__' ? !p.categoriaId : p.categoriaId === cf);
+      }
+      if (!matchCat) return false;
+
+      // 3. Filtro de Coleção (múltipla seleção)
+      let matchCol = true;
+      if (stockCollectionFilters.length > 0) {
+        matchCol = stockCollectionFilters.some(cf => cf === '__sem_colecao__' ? !p.colecaoId : p.colecaoId === cf);
+      }
+      if (!matchCol) return false;
+
+      // 4. Filtro de Status (Ativos / Inativos) - combinável
+      let matchStatus = true;
+      if (selectedStatus.length === 1) {
+        if (selectedStatus[0] === 'ativos') matchStatus = p.ativo !== false;
+        if (selectedStatus[0] === 'inativos') matchStatus = p.ativo === false;
+      }
+
+      // 5. Filtro de Nível de Estoque (Com estoque / Zerados / Negativos) - combinável
+      let matchLevel = true;
+      if (selectedLevels.length > 0 && selectedLevels.length < 3) {
+        const est = p.estoque || 0;
+        matchLevel = selectedLevels.some(lvl => {
+          if (lvl === 'com_estoque') return est > 0;
+          if (lvl === 'zerados') return est === 0;
+          if (lvl === 'negativos') return est < 0;
+          return false;
+        });
+      }
+
+      return matchStatus && matchLevel;
     });
-  }, [sortedProducts, stockSearch, stockFilter]);
+  }, [sortedProducts, stockSearch, stockFilters, stockCategoryFilters, stockCollectionFilters]);
+
+  const stockGrouped = useMemo(() => {
+    return groupProducts(stockFilteredProducts, sortedCategories, sortedCollections, stockGroupBy);
+  }, [stockFilteredProducts, sortedCategories, sortedCollections, stockGroupBy]);
 
   const replenishFilteredProducts = useMemo(() => {
     const term = replenishSearch.trim().toLowerCase();
@@ -576,22 +638,18 @@ export default function ProdutosManager({ products = [], categories = [], collec
       const matchName = !term || (p.nome || '').toLowerCase().includes(term);
 
       let matchCat = true;
-      if (replenishCategoryFilter === '__sem_categoria__') {
-        matchCat = !p.categoriaId;
-      } else if (replenishCategoryFilter) {
-        matchCat = p.categoriaId === replenishCategoryFilter;
+      if (replenishCategoryFilters.length > 0) {
+        matchCat = replenishCategoryFilters.some(cf => cf === '__sem_categoria__' ? !p.categoriaId : p.categoriaId === cf);
       }
 
       let matchCol = true;
-      if (replenishCollectionFilter === '__sem_colecao__') {
-        matchCol = !p.colecaoId;
-      } else if (replenishCollectionFilter) {
-        matchCol = p.colecaoId === replenishCollectionFilter;
+      if (replenishCollectionFilters.length > 0) {
+        matchCol = replenishCollectionFilters.some(cf => cf === '__sem_colecao__' ? !p.colecaoId : p.colecaoId === cf);
       }
 
       return matchName && matchCat && matchCol;
     });
-  }, [sortedProducts, replenishSearch, replenishCategoryFilter, replenishCollectionFilter]);
+  }, [sortedProducts, replenishSearch, replenishCategoryFilters, replenishCollectionFilters]);
 
   const replenishGrouped = useMemo(() => {
     return groupProducts(replenishFilteredProducts, sortedCategories, sortedCollections, replenishGroupBy);
@@ -995,13 +1053,13 @@ export default function ProdutosManager({ products = [], categories = [], collec
                   <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                     Mostrando <strong>{productFilteredList.length}</strong> de {products.length} produtos
                   </span>
-                  {(productSearch || productCategoryFilter || productCollectionFilter) && (
+                  {(productSearch || productCategoryFilters.length > 0 || productCollectionFilters.length > 0) && (
                     <button
                       type="button"
                       onClick={() => {
                         setProductSearch('');
-                        setProductCategoryFilter('');
-                        setProductCollectionFilter('');
+                        setProductCategoryFilters([]);
+                        setProductCollectionFilters([]);
                       }}
                       style={{
                         background: 'var(--bg-surface-elevated)',
@@ -1034,59 +1092,33 @@ export default function ProdutosManager({ products = [], categories = [], collec
                 borderTop: '1px solid var(--border-subtle)'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', flex: 1 }}>
-                  {/* Filtro por Categoria */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Tag size={15} color="var(--primary)" />
-                    <select
-                      value={productCategoryFilter}
-                      onChange={(e) => setProductCategoryFilter(e.target.value)}
-                      style={{
-                        background: 'var(--bg-surface-elevated)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '6px 10px',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        color: productCategoryFilter ? 'var(--primary)' : 'var(--text-primary)',
-                        cursor: 'pointer',
-                        outline: 'none',
-                        minWidth: '170px'
-                      }}
-                    >
-                      <option value="">Todas as categorias</option>
-                      {sortedCategories.map(c => (
-                        <option key={c.id} value={c.id}>{c.nome}</option>
-                      ))}
-                      <option value="__sem_categoria__">Sem categoria</option>
-                    </select>
-                  </div>
+                  {/* Filtro por Categoria (múltipla seleção) */}
+                  <MultiSelectDropdown
+                    icon={Tag}
+                    iconColor="var(--primary)"
+                    placeholder="Todas as categorias"
+                    allLabel="Todas as categorias"
+                    itemLabelSingular="categoria"
+                    itemLabelPlural="categorias"
+                    options={categorySelectOptions}
+                    selectedValues={productCategoryFilters}
+                    onChange={setProductCategoryFilters}
+                    accentColor="var(--primary)"
+                  />
 
-                  {/* Filtro por Coleção */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Layers size={15} color="#a855f7" />
-                    <select
-                      value={productCollectionFilter}
-                      onChange={(e) => setProductCollectionFilter(e.target.value)}
-                      style={{
-                        background: 'var(--bg-surface-elevated)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '6px 10px',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        color: productCollectionFilter ? '#a855f7' : 'var(--text-primary)',
-                        cursor: 'pointer',
-                        outline: 'none',
-                        minWidth: '170px'
-                      }}
-                    >
-                      <option value="">Todas as coleções</option>
-                      {sortedCollections.map(c => (
-                        <option key={c.id} value={c.id}>{c.nome}</option>
-                      ))}
-                      <option value="__sem_colecao__">Sem coleção</option>
-                    </select>
-                  </div>
+                  {/* Filtro por Coleção (múltipla seleção) */}
+                  <MultiSelectDropdown
+                    icon={Layers}
+                    iconColor="#a855f7"
+                    placeholder="Todas as coleções"
+                    allLabel="Todas as coleções"
+                    itemLabelSingular="coleção"
+                    itemLabelPlural="coleções"
+                    options={collectionSelectOptions}
+                    selectedValues={productCollectionFilters}
+                    onChange={setProductCollectionFilters}
+                    accentColor="#a855f7"
+                  />
                 </div>
 
                 {/* Seletor de Subdivisão (Categoria > Coleção ou Coleção > Categoria) */}
@@ -1178,8 +1210,8 @@ export default function ProdutosManager({ products = [], categories = [], collec
                   type="button"
                   onClick={() => {
                     setProductSearch('');
-                    setProductCategoryFilter('');
-                    setProductCollectionFilter('');
+                    setProductCategoryFilters([]);
+                    setProductCollectionFilters([]);
                   }}
                   style={{
                     marginTop: '12px',
@@ -1452,317 +1484,672 @@ export default function ProdutosManager({ products = [], categories = [], collec
           </div>
 
           {/* Barra de Busca e Filtros de Estoque */}
-          <div style={{
-            display: 'flex',
-            gap: '10px',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            background: 'var(--bg-surface)',
-            padding: '12px 16px',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--border-subtle)'
-          }}>
-            {/* Campo de Busca */}
-            <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '200px' }}>
-              <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-              <input
-                type="text"
-                placeholder="Buscar produto no estoque..."
-                value={stockSearch}
-                onChange={(e) => setStockSearch(e.target.value)}
-                style={{ width: '100%', paddingLeft: '36px' }}
-              />
-              {stockSearch && (
-                <button
-                  onClick={() => setStockSearch('')}
-                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', color: 'var(--text-muted)' }}
+          {(() => {
+            const handleToggleStockFilter = (id) => {
+              if (id === 'all') {
+                setStockFilters([]);
+                return;
+              }
+              setStockFilters((prev) => {
+                if (prev.includes(id)) {
+                  return prev.filter(f => f !== id);
+                } else {
+                  return [...prev, id];
+                }
+              });
+            };
+
+            const isAllFiltersEmpty = stockFilters.length === 0;
+
+            const stockFilterButtons = [
+              { id: 'all', label: 'Todos', isSelected: isAllFiltersEmpty },
+              { 
+                id: 'ativos', 
+                label: 'Ativos', 
+                isSelected: stockFilters.includes('ativos'),
+                badge: products.filter(p => p.ativo !== false).length, 
+                badgeColor: '#22c55e' 
+              },
+              { 
+                id: 'inativos', 
+                label: 'Inativos', 
+                isSelected: stockFilters.includes('inativos'),
+                badge: products.filter(p => p.ativo === false).length, 
+                badgeColor: 'var(--danger)' 
+              },
+              { 
+                id: 'com_estoque', 
+                label: 'Com estoque', 
+                isSelected: stockFilters.includes('com_estoque'),
+                badge: products.filter(p => (p.estoque || 0) > 0).length, 
+                badgeColor: 'var(--primary)' 
+              },
+              { 
+                id: 'zerados', 
+                label: 'Zerados', 
+                isSelected: stockFilters.includes('zerados'),
+                badge: products.filter(p => p.ativo !== false && (p.estoque || 0) === 0).length, 
+                badgeColor: '#f59e0b' 
+              },
+              { 
+                id: 'negativos', 
+                label: 'Negativos', 
+                isSelected: stockFilters.includes('negativos'),
+                badge: products.filter(p => p.ativo !== false && (p.estoque || 0) < 0).length, 
+                badgeColor: 'var(--danger)' 
+              }
+            ];
+
+            const renderStockProductRow = (p) => {
+              const isNegative = (p.estoque || 0) < 0;
+              const isZero = (p.estoque || 0) === 0;
+              const categoryName = sortedCategories.find(c => c.id === p.categoriaId)?.nome || 'Sem Categoria';
+              const collectionName = sortedCollections.find(c => c.id === p.colecaoId)?.nome;
+              const isEditingThis = editingStockId === p.id;
+
+              return (
+                <div
+                  key={p.id}
+                  style={{
+                    background: 'var(--bg-surface)',
+                    borderRadius: 'var(--radius-md)',
+                    border: isNegative 
+                      ? '1px solid rgba(239, 68, 68, 0.4)' 
+                      : '1px solid var(--border-subtle)',
+                    padding: '12px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                  }}
                 >
-                  <X size={14} />
-                </button>
-              )}
-            </div>
+                  {/* Identificação do Produto */}
+                  <div style={{ flex: '1 1 240px', minWidth: '220px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                      <span className="badge badge-primary">{categoryName}</span>
+                      {collectionName && (
+                        <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.18)', color: '#818cf8', gap: '4px' }}>
+                          <Layers size={11} /> {collectionName}
+                        </span>
+                      )}
+                      {p.ativo === false ? (
+                        <span style={{
+                          background: 'rgba(239, 68, 68, 0.15)',
+                          color: 'var(--danger)',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '4px'
+                        }}>
+                          Inativo
+                        </span>
+                      ) : (
+                        <span style={{
+                          background: 'rgba(34, 197, 94, 0.15)',
+                          color: '#22c55e',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '4px'
+                        }}>
+                          Ativo
+                        </span>
+                      )}
+                    </div>
 
-            {/* Filtros rápidos de estoque */}
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {[
-                { id: 'all', label: 'Todos' },
-                { id: 'negativos', label: 'Negativos', badge: products.filter(p => p.ativo !== false && (p.estoque || 0) < 0).length, badgeColor: 'var(--danger)' },
-                { id: 'zerados', label: 'Zerados', badge: products.filter(p => p.ativo !== false && (p.estoque || 0) === 0).length, badgeColor: '#f59e0b' },
-                { id: 'positivos', label: 'Positivos' },
-                { id: 'inativos', label: 'Inativos' }
-              ].map((f) => {
-                const isSelected = stockFilter === f.id;
-                return (
-                  <button
-                    key={f.id}
-                    onClick={() => setStockFilter(f.id)}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      background: isSelected ? 'var(--primary)' : 'var(--bg-surface-elevated)',
-                      color: isSelected ? '#fff' : 'var(--text-secondary)',
-                      border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
+                    <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)' }}>
+                      {p.nome}
+                    </div>
+
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      Preço: R$ {p.preco.toFixed(2).replace('.', ',')}
+                      {p.precoCusto > 0 && ` • Custo: R$ ${p.precoCusto.toFixed(2).replace('.', ',')}`}
+                    </div>
+                  </div>
+
+                  {/* Destaque do Estoque Atual e Ações */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '14px',
+                    flexWrap: 'wrap'
+                  }}>
+                    <div style={{
                       display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}
-                  >
-                    <span>{f.label}</span>
-                    {f.badge !== undefined && f.badge > 0 && (
-                      <span style={{
-                        background: isSelected ? '#fff' : f.badgeColor,
-                        color: isSelected ? f.badgeColor : '#fff',
-                        borderRadius: 'var(--radius-full)',
-                        padding: '1px 6px',
-                        fontSize: '10px',
-                        fontWeight: 800
+                      flexDirection: 'column',
+                      alignItems: 'flex-end',
+                      minWidth: '105px'
+                    }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>ESTOQUE ATUAL</span>
+                      <div style={{
+                        fontSize: '20px',
+                        fontWeight: 800,
+                        color: isNegative ? 'var(--danger)' : isZero ? '#f59e0b' : 'var(--text-primary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
                       }}>
-                        {f.badge}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Lista de Produtos no Estoque */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {stockFilteredProducts.length === 0 ? (
-              <div style={{
-                textAlign: 'center',
-                padding: '50px 20px',
-                background: 'var(--bg-surface)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--text-muted)'
-              }}>
-                Nenhum produto encontrado com os filtros selecionados.
-              </div>
-            ) : (
-              stockFilteredProducts.map((p) => {
-                const isNegative = (p.estoque || 0) < 0;
-                const isZero = (p.estoque || 0) === 0;
-                const categoryName = sortedCategories.find(c => c.id === p.categoriaId)?.nome || 'Sem Categoria';
-                const collectionName = sortedCollections.find(c => c.id === p.colecaoId)?.nome;
-                const isEditingThis = editingStockId === p.id;
-
-                return (
-                  <div
-                    key={p.id}
-                    style={{
-                      background: 'var(--bg-surface)',
-                      borderRadius: 'var(--radius-md)',
-                      border: isNegative 
-                        ? '1px solid rgba(239, 68, 68, 0.4)' 
-                        : '1px solid var(--border-subtle)',
-                      padding: '12px 16px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      flexWrap: 'wrap',
-                      gap: '12px'
-                    }}
-                  >
-                    {/* Identificação do Produto */}
-                    <div style={{ flex: '1 1 240px', minWidth: '220px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                        <span className="badge badge-primary">{categoryName}</span>
-                        {collectionName && (
-                          <span className="badge" style={{ background: 'rgba(99, 102, 241, 0.18)', color: '#818cf8', gap: '4px' }}>
-                            <Layers size={11} /> {collectionName}
-                          </span>
-                        )}
-                        {p.ativo === false ? (
-                          <span style={{
-                            background: 'rgba(239, 68, 68, 0.15)',
-                            color: 'var(--danger)',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            padding: '2px 8px',
-                            borderRadius: '4px'
-                          }}>
-                            Inativo no PDV
-                          </span>
-                        ) : (
-                          <span style={{
-                            background: 'rgba(34, 197, 94, 0.15)',
-                            color: '#22c55e',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            padding: '2px 8px',
-                            borderRadius: '4px'
-                          }}>
-                            Ativo
-                          </span>
-                        )}
-                      </div>
-
-                      <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)' }}>
-                        {p.nome}
-                      </div>
-
-                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                        Preço: R$ {p.preco.toFixed(2).replace('.', ',')}
-                        {p.precoCusto > 0 && ` • Custo: R$ ${p.precoCusto.toFixed(2).replace('.', ',')}`}
+                        {isNegative && <AlertTriangle size={18} style={{ color: 'var(--danger)' }} />}
+                        <span>{p.estoque ?? 0}</span>
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>un</span>
                       </div>
                     </div>
 
-                    {/* Destaque do Estoque Atual e Ações */}
+                    {/* Ajuste Direto / Rápido */}
                     <div style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '14px',
-                      flexWrap: 'wrap'
+                      gap: '6px',
+                      background: 'var(--bg-surface-elevated)',
+                      padding: '6px 8px',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--border-strong)'
                     }}>
-                      <div style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'flex-end',
-                        minWidth: '105px'
-                      }}>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>ESTOQUE ATUAL</span>
-                        <div style={{
-                          fontSize: '20px',
-                          fontWeight: 800,
-                          color: isNegative ? 'var(--danger)' : isZero ? '#f59e0b' : 'var(--text-primary)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}>
-                          {isNegative && <AlertTriangle size={18} style={{ color: 'var(--danger)' }} />}
-                          <span>{p.estoque ?? 0}</span>
-                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>un</span>
+                      {isEditingThis ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <input
+                            type="number"
+                            step="1"
+                            autoFocus
+                            value={editingStockVal}
+                            onChange={(e) => setEditingStockVal(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveDirectStock(p.id, editingStockVal);
+                              if (e.key === 'Escape') setEditingStockId(null);
+                            }}
+                            style={{
+                              width: '70px',
+                              padding: '4px 6px',
+                              textAlign: 'center',
+                              fontWeight: 700,
+                              fontSize: '14px'
+                            }}
+                          />
+                          <button
+                            onClick={() => handleSaveDirectStock(p.id, editingStockVal)}
+                            style={{
+                              background: 'var(--primary)',
+                              color: '#fff',
+                              padding: '6px 10px',
+                              borderRadius: 'var(--radius-sm)'
+                            }}
+                            title="Salvar quantidade"
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            onClick={() => setEditingStockId(null)}
+                            style={{
+                              background: 'transparent',
+                              color: 'var(--text-muted)',
+                              padding: '6px'
+                            }}
+                            title="Cancelar"
+                          >
+                            <X size={14} />
+                          </button>
                         </div>
-                      </div>
+                      ) : (
+                        <>
+                          {/* Botão Diminuir -1 */}
+                          <button
+                            onClick={() => handleQuickStockStep(p, -1)}
+                            style={{
+                              background: 'var(--bg-surface)',
+                              color: 'var(--text-primary)',
+                              border: '1px solid var(--border-subtle)',
+                              width: '30px',
+                              height: '30px',
+                              borderRadius: 'var(--radius-sm)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                            title="Diminuir 1 unidade"
+                          >
+                            <Minus size={14} />
+                          </button>
 
-                      {/* Ajuste Direto / Rápido */}
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: 'var(--bg-surface-elevated)',
-                        padding: '6px 8px',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid var(--border-strong)'
-                      }}>
-                        {isEditingThis ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <input
-                              type="number"
-                              step="1"
-                              autoFocus
-                              value={editingStockVal}
-                              onChange={(e) => setEditingStockVal(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSaveDirectStock(p.id, editingStockVal);
-                                if (e.key === 'Escape') setEditingStockId(null);
-                              }}
-                              style={{
-                                width: '70px',
-                                padding: '4px 6px',
-                                textAlign: 'center',
-                                fontWeight: 700,
-                                fontSize: '14px'
-                              }}
-                            />
-                            <button
-                              onClick={() => handleSaveDirectStock(p.id, editingStockVal)}
-                              style={{
-                                background: 'var(--primary)',
-                                color: '#fff',
-                                padding: '6px 10px',
-                                borderRadius: 'var(--radius-sm)'
-                              }}
-                              title="Salvar quantidade"
-                            >
-                              <Check size={14} />
-                            </button>
-                            <button
-                              onClick={() => setEditingStockId(null)}
-                              style={{
-                                background: 'transparent',
-                                color: 'var(--text-muted)',
-                                padding: '6px'
-                              }}
-                              title="Cancelar"
-                            >
-                              <X size={14} />
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            {/* Botão Diminuir -1 */}
-                            <button
-                              onClick={() => handleQuickStockStep(p, -1)}
-                              style={{
-                                background: 'var(--bg-surface)',
-                                color: 'var(--text-primary)',
-                                border: '1px solid var(--border-subtle)',
-                                width: '30px',
-                                height: '30px',
-                                borderRadius: 'var(--radius-sm)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                              }}
-                              title="Diminuir 1 unidade"
-                            >
-                              <Minus size={14} />
-                            </button>
+                          {/* Botão Aumentar +1 */}
+                          <button
+                            onClick={() => handleQuickStockStep(p, 1)}
+                            style={{
+                              background: 'var(--bg-surface)',
+                              color: 'var(--text-primary)',
+                              border: '1px solid var(--border-subtle)',
+                              width: '30px',
+                              height: '30px',
+                              borderRadius: 'var(--radius-sm)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                            title="Aumentar 1 unidade"
+                          >
+                            <Plus size={14} />
+                          </button>
 
-                            {/* Botão Aumentar +1 */}
-                            <button
-                              onClick={() => handleQuickStockStep(p, 1)}
-                              style={{
-                                background: 'var(--bg-surface)',
-                                color: 'var(--text-primary)',
-                                border: '1px solid var(--border-subtle)',
-                                width: '30px',
-                                height: '30px',
-                                borderRadius: 'var(--radius-sm)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                              }}
-                              title="Aumentar 1 unidade"
-                            >
-                              <Plus size={14} />
-                            </button>
+                          {/* Botão Definir como X */}
+                          <button
+                            onClick={() => {
+                              setEditingStockId(p.id);
+                              setEditingStockVal(String(p.estoque ?? 0));
+                            }}
+                            style={{
+                              background: 'var(--bg-surface)',
+                              color: 'var(--text-secondary)',
+                              border: '1px solid var(--border-subtle)',
+                              padding: '6px 10px',
+                              borderRadius: 'var(--radius-sm)',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            title="Definir quantidade exata (X)"
+                          >
+                            <Edit3 size={12} /> Definir X
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            };
 
-                            {/* Botão Definir como X */}
-                            <button
-                              onClick={() => {
-                                setEditingStockId(p.id);
-                                setEditingStockVal(String(p.estoque ?? 0));
-                              }}
-                              style={{
-                                background: 'var(--bg-surface)',
-                                color: 'var(--text-secondary)',
-                                border: '1px solid var(--border-subtle)',
-                                padding: '6px 10px',
-                                borderRadius: 'var(--radius-sm)',
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px'
-                              }}
-                              title="Definir quantidade exata (X)"
-                            >
-                              <Edit3 size={12} /> Definir X
-                            </button>
-                          </>
+            const hasActiveFilters = stockSearch || stockFilters.length > 0 || stockCategoryFilters.length > 0 || stockCollectionFilters.length > 0;
+
+            return (
+              <>
+                {/* Barra de Busca e Filtros de Estoque */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                  background: 'var(--bg-surface)',
+                  padding: '14px 16px',
+                  borderRadius: 'var(--radius-lg)',
+                  border: '1px solid var(--border-subtle)'
+                }}>
+                  {/* Linha 1: Campo de Busca e Filtros Rápidos Combináveis */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    flexWrap: 'wrap'
+                  }}>
+                    {/* Campo de Busca */}
+                    <div style={{
+                      position: 'relative',
+                      flex: '1 1 240px',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}>
+                      <Search size={18} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', pointerEvents: 'none' }} />
+                      <input
+                        type="text"
+                        placeholder="Buscar produto no estoque..."
+                        value={stockSearch}
+                        onChange={(e) => setStockSearch(e.target.value)}
+                        style={{
+                          width: '100%',
+                          paddingLeft: '38px',
+                          paddingRight: stockSearch ? '36px' : '14px',
+                          height: '40px',
+                          borderRadius: 'var(--radius-md)',
+                          background: 'var(--bg-surface-elevated)',
+                          border: '1px solid var(--border-strong)',
+                          color: 'var(--text-primary)',
+                          fontSize: '13px'
+                        }}
+                      />
+                      {stockSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setStockSearch('')}
+                          title="Limpar busca"
+                          style={{
+                            position: 'absolute',
+                            right: '8px',
+                            background: 'transparent',
+                            color: 'var(--text-muted)',
+                            border: 'none',
+                            padding: '4px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Filtros rápidos combináveis ("somáveis") */}
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      {stockFilterButtons.map((f) => {
+                        const isSelected = f.isSelected;
+                        return (
+                          <button
+                            key={f.id}
+                            type="button"
+                            onClick={() => handleToggleStockFilter(f.id)}
+                            style={{
+                              padding: '7px 12px',
+                              borderRadius: 'var(--radius-sm)',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              background: isSelected ? 'var(--primary)' : 'var(--bg-surface-elevated)',
+                              color: isSelected ? '#fff' : 'var(--text-secondary)',
+                              border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <span>{f.label}</span>
+                            {f.badge !== undefined && (
+                              <span style={{
+                                background: isSelected ? '#fff' : (f.badgeColor || 'var(--border-strong)'),
+                                color: isSelected ? (f.badgeColor || 'var(--primary)') : '#fff',
+                                borderRadius: 'var(--radius-full)',
+                                padding: '1px 6px',
+                                fontSize: '10px',
+                                fontWeight: 800
+                              }}>
+                                {f.badge}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Linha 2: Filtros de Categoria, Coleção, Agrupamento e Contador */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                    flexWrap: 'wrap',
+                    paddingTop: '8px',
+                    borderTop: '1px solid var(--border-subtle)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', flex: 1 }}>
+                      {/* Filtro por Categoria (múltipla seleção) */}
+                      <MultiSelectDropdown
+                        icon={Tag}
+                        iconColor="var(--primary)"
+                        placeholder="Todas as categorias"
+                        allLabel="Todas as categorias"
+                        itemLabelSingular="categoria"
+                        itemLabelPlural="categorias"
+                        options={categorySelectOptions}
+                        selectedValues={stockCategoryFilters}
+                        onChange={setStockCategoryFilters}
+                        accentColor="var(--primary)"
+                      />
+
+                      {/* Filtro por Coleção (múltipla seleção) */}
+                      <MultiSelectDropdown
+                        icon={Layers}
+                        iconColor="#a855f7"
+                        placeholder="Todas as coleções"
+                        allLabel="Todas as coleções"
+                        itemLabelSingular="coleção"
+                        itemLabelPlural="coleções"
+                        options={collectionSelectOptions}
+                        selectedValues={stockCollectionFilters}
+                        onChange={setStockCollectionFilters}
+                        accentColor="#a855f7"
+                      />
+
+                      {/* Contador e Botão Limpar */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: 'auto' }}>
+                        <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                          Mostrando <strong>{stockFilteredProducts.length}</strong> de {products.length} produtos
+                        </span>
+                        {hasActiveFilters && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStockSearch('');
+                              setStockFilters([]);
+                              setStockCategoryFilters([]);
+                              setStockCollectionFilters([]);
+                            }}
+                            style={{
+                              background: 'var(--bg-surface-elevated)',
+                              border: '1px solid var(--border-strong)',
+                              color: 'var(--text-primary)',
+                              padding: '6px 12px',
+                              borderRadius: 'var(--radius-sm)',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            <RotateCcw size={13} /> Limpar filtros
+                          </button>
                         )}
                       </div>
                     </div>
+
+                    {/* Seletor de Agrupamento / Organização */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
+                        Organizar:
+                      </span>
+                      <div style={{
+                        display: 'flex',
+                        background: 'var(--bg-surface-elevated)',
+                        padding: '3px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border-strong)'
+                      }}>
+                        <button
+                          type="button"
+                          onClick={() => setStockGroupBy('categoria')}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: 'var(--radius-sm)',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            background: stockGroupBy === 'categoria' ? 'var(--primary)' : 'transparent',
+                            color: stockGroupBy === 'categoria' ? '#fff' : 'var(--text-secondary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            cursor: 'pointer',
+                            border: 'none'
+                          }}
+                        >
+                          <Tag size={13} /> Por Categoria
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStockGroupBy('colecao')}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: 'var(--radius-sm)',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            background: stockGroupBy === 'colecao' ? '#a855f7' : 'transparent',
+                            color: stockGroupBy === 'colecao' ? '#fff' : 'var(--text-secondary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            cursor: 'pointer',
+                            border: 'none'
+                          }}
+                        >
+                          <Layers size={13} /> Por Coleção
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                );
-              })
-            )}
-          </div>
+                </div>
+
+                {/* Conteúdo Subdividido de Estoque (Igual a Produtos) */}
+                {sortedProducts.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '60px 20px',
+                    background: 'var(--bg-surface)',
+                    borderRadius: 'var(--radius-lg)',
+                    border: '1px solid var(--border-subtle)'
+                  }}>
+                    <Box size={48} strokeWidth={1.2} style={{ color: 'var(--text-muted)', marginBottom: '12px' }} />
+                    <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>Nenhum produto cadastrado</h3>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>
+                      Cadastre seus produtos na aba Produtos para gerenciar o estoque.
+                    </p>
+                  </div>
+                ) : stockFilteredProducts.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '50px 20px',
+                    background: 'var(--bg-surface)',
+                    borderRadius: 'var(--radius-lg)',
+                    border: '1px solid var(--border-subtle)'
+                  }}>
+                    <Search size={40} strokeWidth={1.5} style={{ color: 'var(--text-muted)', marginBottom: '10px' }} />
+                    <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      Nenhum produto encontrado com os filtros selecionados
+                    </h3>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>
+                      Tente buscar por outro termo ou limpe os filtros clicáveis.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStockSearch('');
+                        setStockFilters([]);
+                        setStockCategoryFilter('');
+                        setStockCollectionFilter('');
+                      }}
+                      style={{
+                        marginTop: '12px',
+                        padding: '8px 16px',
+                        borderRadius: 'var(--radius-full)',
+                        background: 'var(--bg-surface-elevated)',
+                        border: '1px solid var(--border-strong)',
+                        color: 'var(--text-primary)',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Limpar filtros
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                    {stockGrouped.map((group) => (
+                      <div
+                        key={group.id}
+                        style={{
+                          background: 'var(--bg-surface)',
+                          borderRadius: 'var(--radius-lg)',
+                          border: '1px solid var(--border-subtle)',
+                          padding: '18px 20px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '16px'
+                        }}
+                      >
+                        {/* Cabeçalho do Grupo Principal (ex: Categoria ou Coleção) */}
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          borderBottom: '1px solid var(--border-subtle)',
+                          paddingBottom: '12px',
+                          flexWrap: 'wrap',
+                          gap: '8px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: 'var(--radius-md)',
+                              background: stockGroupBy === 'categoria' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(168, 85, 247, 0.15)',
+                              color: stockGroupBy === 'categoria' ? 'var(--primary)' : '#a855f7',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}>
+                              {stockGroupBy === 'categoria' ? <Tag size={18} /> : <Layers size={18} />}
+                            </div>
+                            <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+                              {group.nome}
+                            </h2>
+                          </div>
+                          <span className="badge badge-primary" style={{ fontSize: '12px', fontWeight: 700 }}>
+                            {group.totalCount} {group.totalCount === 1 ? 'produto' : 'produtos'}
+                          </span>
+                        </div>
+
+                        {/* Subgrupos */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                          {group.subgroups.map((subgroup) => (
+                            <div key={subgroup.id} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                              {/* Cabeçalho do Subgrupo */}
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '6px 12px',
+                                background: 'var(--bg-surface-elevated)',
+                                borderRadius: 'var(--radius-sm)',
+                                border: '1px solid var(--border-strong)',
+                                width: 'fit-content'
+                              }}>
+                                {stockGroupBy === 'categoria' ? (
+                                  <Layers size={14} style={{ color: '#a855f7' }} />
+                                ) : (
+                                  <Tag size={14} style={{ color: 'var(--primary)' }} />
+                                )}
+                                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                  {subgroup.nome}
+                                </span>
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  color: 'var(--text-secondary)',
+                                  background: 'var(--bg-surface)',
+                                  padding: '1px 6px',
+                                  borderRadius: 'var(--radius-full)'
+                                }}>
+                                  {subgroup.products.length}
+                                </span>
+                              </div>
+
+                              {/* Lista de Linhas de Estoque deste Subgrupo */}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {subgroup.products.map(renderStockProductRow)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -1803,9 +2190,83 @@ export default function ProdutosManager({ products = [], categories = [], collec
             </button>
           </form>
 
+          {/* Barra de Pesquisa de Categorias Existentes */}
+          {categories.length > 0 && (
+            <div style={{
+              position: 'relative',
+              display: 'flex',
+              alignItems: 'center'
+            }}>
+              <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', pointerEvents: 'none' }} />
+              <input
+                type="text"
+                placeholder="Pesquisar categoria existente..."
+                value={categorySearch}
+                onChange={(e) => setCategorySearch(e.target.value)}
+                style={{
+                  width: '100%',
+                  paddingLeft: '36px',
+                  paddingRight: categorySearch ? '36px' : '12px',
+                  height: '38px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  color: 'var(--text-primary)',
+                  fontSize: '13px'
+                }}
+              />
+              {categorySearch && (
+                <button
+                  type="button"
+                  onClick={() => setCategorySearch('')}
+                  title="Limpar busca"
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    background: 'transparent',
+                    color: 'var(--text-muted)',
+                    border: 'none',
+                    padding: '4px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Lista de Categorias */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {categories.map((cat) => {
+            {categories.length === 0 ? (
+              <div style={{
+                textAlign: 'center',
+                padding: '40px 20px',
+                background: 'var(--bg-surface)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-subtle)',
+                color: 'var(--text-muted)'
+              }}>
+                <Tag size={36} strokeWidth={1.2} style={{ marginBottom: '8px', opacity: 0.6 }} />
+                <p style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Nenhuma categoria cadastrada</p>
+                <p style={{ fontSize: '13px', marginTop: '4px' }}>Digite um nome acima para criar a primeira categoria.</p>
+              </div>
+            ) : filteredCategoriesList.length === 0 ? (
+              <div style={{
+                textAlign: 'center',
+                padding: '30px 20px',
+                background: 'var(--bg-surface)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-subtle)',
+                color: 'var(--text-muted)',
+                fontSize: '13px'
+              }}>
+                Nenhuma categoria encontrada para "{categorySearch}".
+              </div>
+            ) : (
+              filteredCategoriesList.map((cat) => {
               const isEditing = editingCatId === cat.id;
               const count = products.filter(p => p.categoriaId === cat.id).length;
 
@@ -1904,7 +2365,7 @@ export default function ProdutosManager({ products = [], categories = [], collec
                   )}
                 </div>
               );
-            })}
+            }))}
           </div>
         </div>
       )}
@@ -1946,6 +2407,54 @@ export default function ProdutosManager({ products = [], categories = [], collec
             </button>
           </form>
 
+          {/* Barra de Pesquisa de Coleções Existentes */}
+          {collections.length > 0 && (
+            <div style={{
+              position: 'relative',
+              display: 'flex',
+              alignItems: 'center'
+            }}>
+              <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', pointerEvents: 'none' }} />
+              <input
+                type="text"
+                placeholder="Pesquisar coleção existente..."
+                value={collectionSearch}
+                onChange={(e) => setCollectionSearch(e.target.value)}
+                style={{
+                  width: '100%',
+                  paddingLeft: '36px',
+                  paddingRight: collectionSearch ? '36px' : '12px',
+                  height: '38px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  color: 'var(--text-primary)',
+                  fontSize: '13px'
+                }}
+              />
+              {collectionSearch && (
+                <button
+                  type="button"
+                  onClick={() => setCollectionSearch('')}
+                  title="Limpar busca"
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    background: 'transparent',
+                    color: 'var(--text-muted)',
+                    border: 'none',
+                    padding: '4px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Lista de Coleções */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {collections.length === 0 ? (
@@ -1961,8 +2470,20 @@ export default function ProdutosManager({ products = [], categories = [], collec
                 <p style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Nenhuma coleção cadastrada</p>
                 <p style={{ fontSize: '13px', marginTop: '4px' }}>Digite um nome acima para criar a primeira coleção.</p>
               </div>
+            ) : filteredCollectionsList.length === 0 ? (
+              <div style={{
+                textAlign: 'center',
+                padding: '30px 20px',
+                background: 'var(--bg-surface)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-subtle)',
+                color: 'var(--text-muted)',
+                fontSize: '13px'
+              }}>
+                Nenhuma coleção encontrada para "{collectionSearch}".
+              </div>
             ) : (
-              collections.map((col) => {
+              filteredCollectionsList.map((col) => {
                 const isEditing = editingColId === col.id;
                 const count = products.filter(p => p.colecaoId === col.id).length;
 
@@ -2389,59 +2910,35 @@ export default function ProdutosManager({ products = [], categories = [], collec
                 flexWrap: 'wrap'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flex: 1 }}>
-                  {/* Filtro por Categoria */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Tag size={13} color="var(--primary)" />
-                    <select
-                      value={replenishCategoryFilter}
-                      onChange={(e) => setReplenishCategoryFilter(e.target.value)}
-                      style={{
-                        background: 'var(--bg-surface)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '5px 8px',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        color: replenishCategoryFilter ? 'var(--primary)' : 'var(--text-primary)',
-                        cursor: 'pointer',
-                        outline: 'none',
-                        minWidth: '150px'
-                      }}
-                    >
-                      <option value="">Todas as categorias</option>
-                      {sortedCategories.map(c => (
-                        <option key={c.id} value={c.id}>{c.nome}</option>
-                      ))}
-                      <option value="__sem_categoria__">Sem categoria</option>
-                    </select>
-                  </div>
+                  {/* Filtro por Categoria (múltipla seleção) */}
+                  <MultiSelectDropdown
+                    icon={Tag}
+                    iconColor="var(--primary)"
+                    placeholder="Todas as categorias"
+                    allLabel="Todas as categorias"
+                    itemLabelSingular="categoria"
+                    itemLabelPlural="categorias"
+                    options={categorySelectOptions}
+                    selectedValues={replenishCategoryFilters}
+                    onChange={setReplenishCategoryFilters}
+                    minWidth="160px"
+                    accentColor="var(--primary)"
+                  />
 
-                  {/* Filtro por Coleção */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Layers size={13} color="#a855f7" />
-                    <select
-                      value={replenishCollectionFilter}
-                      onChange={(e) => setReplenishCollectionFilter(e.target.value)}
-                      style={{
-                        background: 'var(--bg-surface)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '5px 8px',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        color: replenishCollectionFilter ? '#a855f7' : 'var(--text-primary)',
-                        cursor: 'pointer',
-                        outline: 'none',
-                        minWidth: '150px'
-                      }}
-                    >
-                      <option value="">Todas as coleções</option>
-                      {sortedCollections.map(c => (
-                        <option key={c.id} value={c.id}>{c.nome}</option>
-                      ))}
-                      <option value="__sem_colecao__">Sem coleção</option>
-                    </select>
-                  </div>
+                  {/* Filtro por Coleção (múltipla seleção) */}
+                  <MultiSelectDropdown
+                    icon={Layers}
+                    iconColor="#a855f7"
+                    placeholder="Todas as coleções"
+                    allLabel="Todas as coleções"
+                    itemLabelSingular="coleção"
+                    itemLabelPlural="coleções"
+                    options={collectionSelectOptions}
+                    selectedValues={replenishCollectionFilters}
+                    onChange={setReplenishCollectionFilters}
+                    minWidth="160px"
+                    accentColor="#a855f7"
+                  />
                 </div>
 
                 {/* Alternador de Organização */}
@@ -2487,13 +2984,13 @@ export default function ProdutosManager({ products = [], categories = [], collec
                     </button>
                   </div>
 
-                  {(replenishSearch || replenishCategoryFilter || replenishCollectionFilter) && (
+                  {(replenishSearch || replenishCategoryFilters.length > 0 || replenishCollectionFilters.length > 0) && (
                     <button
                       type="button"
                       onClick={() => {
                         setReplenishSearch('');
-                        setReplenishCategoryFilter('');
-                        setReplenishCollectionFilter('');
+                        setReplenishCategoryFilters([]);
+                        setReplenishCollectionFilters([]);
                       }}
                       style={{
                         background: 'transparent',

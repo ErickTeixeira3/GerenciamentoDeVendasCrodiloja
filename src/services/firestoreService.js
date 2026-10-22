@@ -9,7 +9,8 @@ import {
   query, 
   orderBy,
   writeBatch,
-  increment
+  increment,
+  getDoc
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -325,7 +326,96 @@ export async function createSale(saleData) {
   return newSaleDocRef;
 }
 
-export async function deleteSale(saleId) {
-  const docRef = doc(db, "Vendas", saleId);
-  return await deleteDoc(docRef);
+export async function updateSale(saleId, originalSale, updatedSaleData) {
+  const batch = writeBatch(db);
+  const saleDocRef = doc(db, "Vendas", saleId);
+
+  // Se originalSale não foi passado completo com itens, busca do Firestore
+  let orig = originalSale;
+  if (!orig || !orig.itens) {
+    const saleSnap = await getDoc(saleDocRef);
+    if (saleSnap.exists()) {
+      orig = saleSnap.data();
+    }
+  }
+
+  // 1. Atualiza os dados da venda
+  batch.update(saleDocRef, {
+    ...updatedSaleData,
+    atualizadoEm: serverTimestamp()
+  });
+
+  // 2. Calcula a diferença de estoque por produto:
+  // delta = originalQty - newQty
+  // delta > 0: o usuário reduziu quantidade ou removeu o item -> estorna (+delta) para o estoque
+  // delta < 0: o usuário aumentou quantidade ou adicionou novo item -> debita (-delta) do estoque
+  const productDeltas = new Map();
+
+  (orig?.itens || []).forEach((item) => {
+    if (item.produtoId) {
+      const current = productDeltas.get(item.produtoId) || 0;
+      productDeltas.set(item.produtoId, current + Number(item.quantidade || 0));
+    }
+  });
+
+  (updatedSaleData?.itens || []).forEach((item) => {
+    if (item.produtoId) {
+      const current = productDeltas.get(item.produtoId) || 0;
+      productDeltas.set(item.produtoId, current - Number(item.quantidade || 0));
+    }
+  });
+
+  for (const [produtoId, delta] of productDeltas.entries()) {
+    if (delta !== 0) {
+      const prodRef = doc(db, "Produtos", produtoId);
+      const prodSnap = await getDoc(prodRef);
+      if (prodSnap.exists()) {
+        batch.update(prodRef, {
+          estoque: increment(delta),
+          atualizadoEm: serverTimestamp()
+        });
+      }
+    }
+  }
+
+  return await batch.commit();
 }
+
+export async function deleteSale(saleOrId, maybeItens) {
+  const saleId = typeof saleOrId === 'object' ? saleOrId.id : saleOrId;
+  let itens = typeof saleOrId === 'object' ? saleOrId.itens : maybeItens;
+
+  const saleDocRef = doc(db, "Vendas", saleId);
+
+  if (!itens) {
+    const saleSnap = await getDoc(saleDocRef);
+    if (saleSnap.exists()) {
+      itens = saleSnap.data().itens || [];
+    }
+  }
+
+  const batch = writeBatch(db);
+  batch.delete(saleDocRef);
+
+  // Estorna o estoque de todos os itens da venda cancelada
+  if (Array.isArray(itens)) {
+    for (const item of itens) {
+      if (item.produtoId) {
+        const qty = Number(item.quantidade || 0);
+        if (qty > 0) {
+          const prodRef = doc(db, "Produtos", item.produtoId);
+          const prodSnap = await getDoc(prodRef);
+          if (prodSnap.exists()) {
+            batch.update(prodRef, {
+              estoque: increment(qty),
+              atualizadoEm: serverTimestamp()
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return await batch.commit();
+}
+
